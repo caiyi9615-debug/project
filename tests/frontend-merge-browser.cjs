@@ -1,0 +1,38 @@
+'use strict';
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
+const assert=require('node:assert/strict'),path=require('node:path'),fs=require('node:fs');
+const D=require('../public/domain'),P=require('../public/planner'),{validateOutput}=require('../ai');
+const base=process.env.TEST_BASE_URL||'http://127.0.0.1:8791',out=process.env.TEST_EVIDENCE||path.join(require('node:os').tmpdir(),'deadline-hunter-merge-qa');fs.mkdirSync(out,{recursive:true});
+const results=[],pass=name=>{results.push(name);console.log('PASS '+name);};
+(async()=>{
+ const browser=await chromium.launch({headless:true,executablePath:process.env.EDGE_PATH||'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'});
+ try{
+  const ctx=await browser.newContext({serviceWorkers:'block',viewport:{width:1440,height:1000},acceptDownloads:true});
+  const page=await ctx.newPage(),errors=[];const reveal=async el=>el.evaluate(n=>{for(let p=n.parentElement;p;p=p.parentElement)if(p.tagName==='DETAILS')p.open=true;});page.on('pageerror',e=>errors.push(e.message));
+  await page.goto(base+'/#tasks');await page.getByRole('heading',{name:'我的任务'}).waitFor();await page.getByText('服务已连接 · 密钥待配置',{exact:true}).waitFor();assert.match(await page.title(),/2\.5\.0/);pass('V2.4.2健康服务不再被误报为断开');
+  const plan=P.generate({items:P.makeItems({total:3}),rules:{startDate:'2028-11-01',endDate:'2028-11-15'},today:'2026-10-26'}).plan;
+  const task=D.cleanTask({title:'合并测试大任务',plan,executionStatus:'unsubmitted'});
+  await page.evaluate(s=>CampusStore.write(s),{version:2,tasks:[task],sources:[],history:[],changes:[],theme:'light'});await page.reload();await page.getByRole('heading',{name:'我的任务'}).waitFor();
+  await page.locator('.topbar [data-action="theme"]').click();await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark');assert.equal(await page.evaluate(()=>localStorage.getItem('dh-theme')),'dark');assert.equal((await page.evaluate(()=>CampusStore.read())).tasks[0].plan.items.length,3);pass('切换主题后计划仍保留，主题同时存入预加载缓存');
+  let releaseApp;const appGate=new Promise(resolve=>releaseApp=resolve);
+  await page.route('**/app.js',async route=>{await appGate;await route.continue();});
+  await page.reload({waitUntil:'commit'});await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark'&&document.querySelector('#app')?.textContent.includes('正在打开'));pass('主应用脚本加载前已恢复深色主题，避免先亮后暗');releaseApp();await page.waitForLoadState('networkidle');await page.unroute('**/app.js');
+  await page.locator('.topbar [data-action="new"]').click();await page.locator('#taskForm [name="title"]').fill('不会被保存的草稿');await page.evaluate(()=>location.hash='calendar');await page.locator('#taskDialog').waitFor({state:'hidden'});assert.equal((await page.evaluate(()=>CampusStore.read())).tasks.length,1);pass('切页关闭任务弹窗但不自动保存未确认草稿');
+  await page.locator('nav a[href="#tasks"]').click();await reveal(page.locator(`#app [data-plan-open="${task.id}"]`));await page.locator(`#app [data-plan-open="${task.id}"]`).click();await page.locator('[data-plan-action="configure"]').click();await page.locator('#planForm [name="maxPerDay"]').fill('2');await page.locator('[data-plan-action="preview"]').click();await page.evaluate(()=>location.hash='dashboard');await page.locator('#planDialog').waitFor({state:'hidden'});assert.deepEqual((await page.evaluate(()=>CampusStore.read())).tasks[0].plan.items,task.plan.items);pass('浏览器返回/切页关闭未保存计划，原计划不被覆盖');
+  await page.locator('nav a[href="#tasks"]').click();await reveal(page.locator(`[data-action="delete"][data-id="${task.id}"]`));await page.locator(`[data-action="delete"][data-id="${task.id}"]`).click();await page.locator('#confirmDialog').waitFor();await page.evaluate(()=>location.hash='settings');await page.locator('#confirmDialog').waitFor({state:'hidden'});assert.equal((await page.evaluate(()=>CampusStore.read())).tasks.length,1);pass('切页取消删除确认，不会在后台继续删除任务');
+  await page.getByRole('heading',{name:'页面本地提醒'}).waitFor();assert.equal(await page.locator('#push-settings').isVisible(),false);pass('本地提醒可用，未配置云推送不再占据首屏');
+  let payloadTasks=[{title:'需要确认时间的通知',statusText:'未提交',dateText:'剩余40小时',checklist:[],uncertain:[]}];
+  await page.route('**/api/analyze',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({ok:true,result:{tasks:validateOutput({tasks:payloadTasks})}})}));
+  await page.locator('nav a[href="#capture"]').click();await page.locator('#noticeText').fill('\n\n  这是通知第一行  \n下一行正文');await page.locator('[data-action="analyze"]').click();await page.locator('#timeDialog').waitFor();await page.evaluate(()=>location.hash='tasks');await page.locator('#timeDialog').waitFor({state:'hidden'});assert.equal((await page.evaluate(()=>CampusStore.read())).tasks.length,1);pass('切页安全取消时间核实，不误判为已核实或自动保存');
+  await page.locator('nav a[href="#capture"]').click();await page.locator('[data-action="add-all"]').click();await page.locator('#timeDialog').waitFor();await page.evaluate(()=>location.hash='dashboard');await page.locator('#timeDialog').waitFor({state:'hidden'});await page.waitForTimeout(100);assert.equal((await page.evaluate(()=>CampusStore.read())).tasks.length,1);pass('批量保存途中切页取消核实，不继续提交后续任务');
+  await page.locator('nav a[href="#capture"]').click();await page.locator('[data-action="add-all"]').click();await page.locator('#timeDialog').waitFor();await page.locator('#skipTime').click();await page.waitForTimeout(100);let state=await page.evaluate(()=>CampusStore.read());assert.equal(state.tasks.length,2);assert.equal(state.sources[0].name,'这是通知第一行');assert.equal(state.tasks.find(t=>t.id!==task.id).dateConfirmed,false);pass('明确选择跳过仍可保存待核实任务，通知名称使用首个非空行');
+  payloadTasks=[{title:'合并测试大任务',statusText:'未提交',deadlineKind:'none',checklist:[],uncertain:[]}];
+  await page.locator('[data-action="analyze"]').click();await page.getByText('已提取 1 个事项，请核对后加入任务',{exact:false}).waitFor();await page.locator('[data-action="add-all"]').click();await page.locator('#duplicateDialog').waitFor();await page.evaluate(()=>location.hash='tasks');await page.locator('#duplicateDialog').waitFor({state:'hidden'});assert.equal((await page.evaluate(()=>CampusStore.read())).tasks[0].plan.items.length,3);assert.equal((await page.evaluate(()=>CampusStore.read())).tasks.length,2);pass('重复确认途中切页不会覆盖大任务或丢失计划');
+  await page.locator('nav a[href="#capture"]').click();await page.evaluate(async()=>{
+   const canvas=document.createElement('canvas');canvas.width=800;canvas.height=4000;const c=canvas.getContext('2d');c.fillStyle='#fff';c.fillRect(0,0,800,4000);c.fillStyle='#111';c.font='20px sans-serif';for(let i=0;i<100;i++)c.fillText('原尺寸长截图测试 '+i,20,30+i*36);
+   const blob=await new Promise(r=>canvas.toBlob(r,'image/png'));const transfer=new DataTransfer();transfer.items.add(new File([blob],'原尺寸长截图.png',{type:'image/png'}));const input=document.querySelector('#imageFile');input.files=transfer.files;input.dispatchEvent(new Event('change'));
+  });await page.locator('#confirmDialog button[value="ok"]').click();await page.locator('.preview img').waitFor();assert.deepEqual(await page.locator('.preview img').evaluate(img=>[img.naturalWidth,img.naturalHeight]),[800,4000]);pass('长截图保留800×4000原尺寸，不默认压缩至1600像素');
+  await page.setViewportSize({width:390,height:844});await page.waitForTimeout(200);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:path.join(out,'V2.4.2-前端修复合并-手机.png'),fullPage:false});pass('手机布局无横向溢出');assert.deepEqual(errors,[]);pass('全程无浏览器运行时异常');
+  console.log(JSON.stringify({passed:results.length}));
+ }finally{await browser.close();}
+})().catch(e=>{console.error(e);process.exitCode=1;});

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <script>(()=>{try{const theme=localStorage.getItem('dh-theme');if(theme==='dark'||theme==='light')document.documentElement.dataset.theme=theme;}catch{}})();</script>
+  <title>Deadline Hunter V2.5.0 · AI校园信息捕手</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%232563eb'/%3E%3Cpath d='M9 8h9l5 5v12H9zM18 8v6h5M12 18h7M12 21h5' fill='none' stroke='white' stroke-width='2'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="planner.css">
+  <link rel="stylesheet" href="capture.css">
+  <link rel="stylesheet" href="experience.css">
+  <link rel="stylesheet" href="simple.css"><link rel="stylesheet" href="quick-add.css">
+  <script src="experience.js" defer></script>
+  <script src="simple-ui.js" defer></script>
+  <link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#2563eb">
+  <link rel="apple-touch-icon" href="/push-icon-192.png">
+  <script src="push-client.js" defer></script>
+  <script src="time.js" defer></script><script src="fidelity.js" defer></script><script src="planner.js" defer></script><script src="domain.js" defer></script><script src="workbench.js" defer></script><script src="inbox-model.js" defer></script><script src="quick-add.js" defer></script><script src="store.js" defer></script><script src="review.js" defer></script><script src="advisor-ui.js" defer></script><script src="planner-ui.js" defer></script><script src="app.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="#dashboard"><span class="brand-icon">D</span><span>Deadline Hunter<small>AI 校园信息捕手</small></span></a>
+    <div class="nav-label">我的工作空间</div>
+    <nav id="navigation" aria-label="主导航"></nav>
+    <button class="button text guide-entry" data-action="guide">使用指引</button><div class="sidebar-bottom"><div class="team-avatar">路</div><div><strong>路边队</strong><small>智慧校园 · 3人团队</small></div><span class="version">V2.5.0</span></div>
+  </aside>
+  <button id="sidebarBackdrop" data-action="close-menu" aria-label="关闭导航" hidden></button><div class="shell">
+    <header class="topbar"><div class="top-left"><button class="icon-button mobile-menu" data-action="menu" aria-label="打开导航">☰</button><span id="breadcrumb">工作空间 / 今天</span></div><div class="top-actions"><span id="connection" class="connection">检查服务中</span><button data-action="theme" class="icon-button" aria-label="切换明暗主题" title="切换明暗主题">◐</button><button class="button compact" data-action="new">＋ 新建任务</button></div></header>
+    <main id="app" tabindex="-1"><div class="loading">正在打开校园工作空间…</div></main>
+    <footer>Deadline Hunter V2.5.0 <span>路边队 · 信息有据，行动有序</span></footer>
+  </div>
+  <dialog id="taskDialog" class="task-dialog"></dialog>
+  <dialog id="confirmDialog" class="confirm-dialog"></dialog>
+  <dialog id="timeDialog" class="task-dialog"></dialog>
+  <dialog id="duplicateDialog" class="task-dialog"></dialog>
+  <dialog id="planDialog" class="task-dialog"></dialog>
+  <dialog id="advisorDialog" class="task-dialog"></dialog>
+  <dialog id="quickDialog" class="task-dialog" aria-labelledby="quickTitle"></dialog>
+  <dialog id="guideDialog" class="confirm-dialog"></dialog>
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+  <input type="file" id="importFile" accept="application/json,.json" hidden>
+</body></html>
