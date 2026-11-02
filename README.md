@@ -25,3 +25,7 @@ Node.js 20或更新版本。`npm start` 启动服务；`npm test` 运行程序�
 浏览器测试见 `tests/inbox-browser.cjs` 和 `tests/inbox-resilience.cjs`，通过 `PLAYWRIGHT_MODULE` 指向本机Playwright，通过 `TEST_BASE_URL` 指定测试地址。测试使用隔离浏览器数据，不影响日常任务。
 
 任务主要保存在浏览器中，没有账号同步。AI结果、年份建议和估时须核对；后台提醒取决于实际配置。密钥仅留在服务端，发行ZIP不含 `.env`。
+
+
+网站演示视频：启动后在首页点“网站演示”，约1分55秒，含中文讲解。
+独立视频在public/media/deadline-hunter-demo.mp4。完整说明见docs/网站演示视频说明.md。

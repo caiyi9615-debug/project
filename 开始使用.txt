@@ -19,3 +19,7 @@ Deadline Hunter V2.5 独立安装版 · 路边队
 
 如果部署到一个新的Render服务，在Render的Environment重新填写DEEPSEEK_API_KEY等环境变量。
 上传GitHub时不要上传填写了真实密钥的.env；Render端口使用平台提供的PORT，不必填写8795。
+
+
+网站演示视频：启动后在首页点“网站演示”，约1分55秒，含中文讲解。
+独立视频在public/media/deadline-hunter-demo.mp4。完整说明见docs/网站演示视频说明.md。

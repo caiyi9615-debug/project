@@ -37,6 +37,7 @@
   <dialog id="advisorDialog" class="task-dialog"></dialog>
   <dialog id="quickDialog" class="task-dialog" aria-labelledby="quickTitle"></dialog>
   <dialog id="guideDialog" class="confirm-dialog"></dialog>
+  <dialog id="videoDialog" class="task-dialog" aria-labelledby="videoTitle"><div class="dialog-head"><div><h2 id="videoTitle">网站操作演示</h2><p class="small muted">路边队 · V2.5 · 预设样例演示，AI返回为预录结果</p></div><button class="review-close" data-action="close-video" aria-label="关闭演示视频">×</button></div><div class="dialog-body"><video id="demoVideo" controls playsinline preload="none" poster="/media/demo-poster.jpg"><source src="/media/deadline-hunter-demo.mp4" type="video/mp4"><track kind="captions" src="/media/demo-captions.vtt" srclang="zh" label="中文完整旁白">当前浏览器不支持播放，可下载MP4观看。</video><p class="small muted">含中文讲解与操作字幕。视频中的日期、任务和进度均为示例，不代表真实AI耗时。</p></div><div class="dialog-foot"><a class="button" href="/media/deadline-hunter-demo.mp4" download="Deadline-Hunter-V2.5-网站演示.mp4">下载MP4</a><button class="button primary" data-action="close-video">返回网站</button></div></dialog>
   <div id="toast" role="status" aria-live="polite" hidden></div>
   <input type="file" id="importFile" accept="application/json,.json" hidden>
 </body></html>

@@ -17,9 +17,9 @@ let currentTaskId=null,toastTimer,revision=0,routeRevision=0;
 const app=$('#app');
 function closeDialogs(){
   window.DHQuickAdd?.close();
-  for(const id of ['confirmDialog','timeDialog','duplicateDialog','advisorDialog','planDialog','taskDialog','guideDialog']){
+  for(const id of ['confirmDialog','timeDialog','duplicateDialog','advisorDialog','planDialog','taskDialog','guideDialog','videoDialog']){
     const modal=document.getElementById(id);if(!modal?.open)continue;
-    if(!['taskDialog','planDialog','advisorDialog','guideDialog'].includes(id))modal.dispatchEvent(new Event('cancel'));
+    if(!['taskDialog','planDialog','advisorDialog','guideDialog','videoDialog'].includes(id))modal.dispatchEvent(new Event('cancel'));
     if(modal.open)modal.close();
   }
 }
@@ -338,6 +338,8 @@ document.addEventListener('click',async e=>{
     case 'clear-queue':imageQueue=[];render();break;
     case 'theme':await mutate(s=>s.theme=s.theme==='dark'?'light':'dark');break;
     case 'new':DHQuickAdd.open();break;
+    case 'video':$('#videoDialog').showModal();$('#demoVideo').play().catch(()=>{});break;
+    case 'close-video':$('#videoDialog').close();break;
     case 'home-filter':DHSimple.setHomeFilter(target.dataset.filter);render();break;
     case 'load-day':selectedDay=target.dataset.day;calendarMonth=new Date(selectedDay+'T12:00');calendarMonth.setDate(1);route('calendar');break;
     case 'focus-today':await dailyAction(id,'focus');break;
@@ -389,3 +391,5 @@ window.addEventListener('dragover',e=>{e.preventDefault();});window.addEventList
 setInterval(()=>{if(state&&['dashboard','radar'].includes(page)&&!saveBusy&&!$('#taskDialog').open)render();},60000);
 setInterval(()=>{if(state)window.DHPush?.sync(state.tasks);},60000);
 (async()=>{try{state=await CampusStore.read();page=pages[location.hash.slice(1)]?location.hash.slice(1):'dashboard';render();await checkHealth();}catch(error){app.innerHTML=`<section class="panel"><h1>本地工作空间无法打开</h1><p class="error">${esc(error.message)}</p><p>请通过 start.bat 启动，并使用支持IndexedDB的浏览器普通窗口。</p></section>`;}})();
+
+document.querySelector('#videoDialog').addEventListener('close',()=>document.querySelector('#demoVideo').pause());

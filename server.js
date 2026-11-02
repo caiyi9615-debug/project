@@ -55,9 +55,25 @@ function serveStatic(req,res){
  if(pathname==='/')pathname='/index.html';
  const file=path.resolve(PUBLIC,`.${pathname}`);
  if(!file.startsWith(PUBLIC+path.sep)){json(res,403,{error:'禁止访问。'});return;}
+ if(['.mp4','.webm'].includes(path.extname(file))){
+  fs.stat(file,(error,stat)=>{
+   if(error||!stat.isFile()){json(res,404,{error:'视频文件不存在。'});return;}
+   const headers={'Content-Type':path.extname(file)==='.mp4'?'video/mp4':'video/webm','Accept-Ranges':'bytes','Cache-Control':'no-cache','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'};
+   let start=0,end=stat.size-1,status=200;
+   if(req.headers.range){
+    const match=req.headers.range.match(/^bytes=(\d*)-(\d*)$/);
+    if(match&&(match[1]||match[2])){start=match[1]?Number(match[1]):Math.max(0,stat.size-Number(match[2]));end=match[1]?(match[2]?Math.min(Number(match[2]),stat.size-1):stat.size-1):stat.size-1;}
+    if(!match||!(match[1]||match[2])||!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<0||start>=stat.size||end<start){res.writeHead(416,{...headers,'Content-Range':`bytes */${stat.size}`});res.end();return;}
+    status=206;headers['Content-Range']=`bytes ${start}-${end}/${stat.size}`;
+   }
+   headers['Content-Length']=end-start+1;res.writeHead(status,headers);
+   if(req.method==='HEAD'){res.end();return;}
+   const stream=fs.createReadStream(file,{start,end});stream.on('error',()=>res.destroy());res.on('close',()=>stream.destroy());stream.pipe(res);
+  });return;
+ }
  fs.readFile(file,(error,content)=>{
   if(error){json(res,404,{error:'文件不存在。'});return;}
-  const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml'}[path.extname(file)]||'application/octet-stream';
+  const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.jpg':'image/jpeg','.jpeg':'image/jpeg','.vtt':'text/vtt; charset=utf-8'}[path.extname(file)]||'application/octet-stream';
   res.writeHead(200,{'Content-Type':pathname.endsWith('.webmanifest')?'application/manifest+json':path.extname(file)==='.png'?'image/png':mime,'Cache-Control':'no-cache','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'});res.end(req.method==='HEAD'?undefined:content);
  });
 }

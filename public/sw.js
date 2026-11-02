@@ -1,6 +1,6 @@
 'use strict';
 // Cache the public shell only. Never cache AI responses, settings, or user images.
-const SHELL_CACHE='deadline-hunter-shell-v2.5.0';
+const SHELL_CACHE='deadline-hunter-shell-v2.5.0-video1';
 const SHELL=['/index.html','/styles.css','/planner.css','/capture.css','/experience.css','/simple.css','/simple-ui.js','/workbench.js','/inbox-model.js','/quick-add.js','/quick-add.css','/app.js','/time.js','/fidelity.js','/domain.js','/store.js','/review.js','/planner.js','/planner-ui.js','/advisor-ui.js','/push-client.js','/experience.js','/manifest.webmanifest','/push-icon-192.png','/push-icon-512.png'];
 self.addEventListener('install',e=>e.waitUntil(caches.open(SHELL_CACHE).then(cache=>cache.addAll(SHELL)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',e=>e.waitUntil((async()=>{for(const key of await caches.keys())if((key.startsWith('deadline-hunter-shell-')||key.startsWith('dh-v3-shell-'))&&key!==SHELL_CACHE)await caches.delete(key);await self.clients.claim();})()));
