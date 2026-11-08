@@ -1,6 +1,8 @@
 'use strict';
 const D=window.DH;
 const T=window.DHTime;
+const B=window.DHBackup;
+let backupMeta={lastExportAt:null,changes:0},backupDismissed=false,backupImportBusy=false;
 const $=selector=>document.querySelector(selector);
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const icon=(name)=>`<svg viewBox="0 0 24 24" aria-hidden="true">${({dashboard:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',capture:'<path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5Z"/>',tasks:'<rect x="5" y="4" width="15" height="17" rx="2"/><path d="M9 4V2h7v2M9 10h7M9 15h7"/>',calendar:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 10h18M8 14h1m6 0h1m-8 4h1"/>',changes:'<path d="M3 8h14l-4-4M21 16H7l4 4M17 8l-4 4M7 16l4-4"/>',radar:'<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><path d="m12 12 7-7M12 12v.01"/>',settings:'<path d="M12 3v3m0 12v3M3 12h3m12 0h3M6 6l2 2m8 8 2 2M6 18l2-2m8-8 2-2"/><circle cx="12" cy="12" r="5"/>',upload:'<path d="M4 16v4h16v-4M12 16V3m-5 5 5-5 5 5"/>'})[name]||'<circle cx="12" cy="12" r="8"/>'}</svg>`;
@@ -17,7 +19,7 @@ let currentTaskId=null,toastTimer,revision=0,routeRevision=0;
 const app=$('#app');
 function closeDialogs(){
   window.DHQuickAdd?.close();
-  for(const id of ['confirmDialog','timeDialog','duplicateDialog','advisorDialog','planDialog','taskDialog','guideDialog','videoDialog']){
+  for(const id of ['backupDialog','confirmDialog','timeDialog','duplicateDialog','advisorDialog','planDialog','taskDialog','guideDialog','videoDialog']){
     const modal=document.getElementById(id);if(!modal?.open)continue;
     if(!['taskDialog','planDialog','advisorDialog','guideDialog','videoDialog'].includes(id))modal.dispatchEvent(new Event('cancel'));
     if(modal.open)modal.close();
@@ -33,12 +35,12 @@ async function mutate(fn,message){
   if(saveBusy){toast('正在保存，请稍候');return false;}
   saveBusy=true;
   const next=structuredClone(state);
-  try {fn(next);await CampusStore.write(next);state=next;revision++;channel?.postMessage({revision});render();window.DHPush?.sync(next.tasks);if(message)toast(message);return true;}
+  try {fn(next);const meta={...backupMeta,changes:backupMeta.changes+B.changed(state.tasks,next.tasks)};await CampusStore.write(next,meta);state=next;backupMeta=meta;revision++;channel?.postMessage({revision});render();window.DHPush?.sync(next.tasks);if(message)toast(message);return true;}
   catch(error){toast(error.message||'保存失败，数据未改变',true);return false;}
   finally{saveBusy=false;}
 }
 const channel=typeof BroadcastChannel==='function'?new BroadcastChannel('deadline-hunter-v2'):null;
-channel?.addEventListener('message',async()=>{if(saveBusy)return;state=await CampusStore.read();render();toast('已同步其他标签页的数据');});
+channel?.addEventListener('message',async()=>{if(saveBusy)return;state=await CampusStore.read();backupMeta=await CampusStore.readBackupMeta();render();toast('已同步其他标签页的数据');});
 function stamp(){return new Date().toISOString();}
 function formatDate(value){return value?String(value).replace('T',' '):'待确认日期';}
 function shortDate(value){return value?`${value.slice(5,10)} ${value.slice(11,16)}`:'待确认';}
@@ -55,6 +57,12 @@ function render(){
   $('#navigation').innerHTML=DHSimple.nav(page,state);
   $('#breadcrumb').textContent='工作空间 / '+pages[page];
   app.innerHTML=({dashboard:renderDashboard,capture:renderCapture,tasks:renderTasks,calendar:renderCalendar,changes:renderChanges,radar:renderRadar,settings:renderSettings})[page]();
+  if(['dashboard','settings'].includes(page)){
+    const box=document.createElement('section');box.className='panel';box.id='backupStatus';
+    const remind=B.due(backupMeta,state.tasks.length)&&!backupDismissed;
+    box.innerHTML='<div class="settings-row"><div><strong>'+ (remind?'该备份了':'本地数据备份')+'</strong><p>上次备份时间：'+esc(backupMeta.lastExportAt?new Date(backupMeta.lastExportAt).toLocaleString('zh-CN'):'尚未备份')+' · 此后任务变更 '+backupMeta.changes+' 条</p><p class="small muted">'+(remind?'请保存一份 JSON 到设备，防止浏览器数据丢失。':'下载后请确认文件已保存到设备。')+'</p></div><div class="actions">'+button('一键导出备份','export','','primary')+(remind?button('暂不提醒','dismiss-backup','','text compact'):'')+'</div></div>';
+    app.prepend(box);
+  }
   if(page==='settings')window.DHPush?.mount(app,state);
   if(page==='capture')wireCapture();
   window.DHPlannerUI?.mount({app,page,getState:()=>state,getDraft:id=>capture.drafts.find(x=>x.id===id),mutate,toast,confirm:confirmAction,refreshTask:id=>{if($('#taskDialog').open&&currentTaskId===id)openTask(id);},exportPlan:task=>download('Deadline-Hunter-执行计划.ics',D.ics(task.plan.items.filter(x=>x.date).map(x=>D.cleanTask({id:task.id+'-'+x.id,title:task.title+' · '+x.title+'（计划安排，非截止）',dueDate:x.date,deadlineKind:'date',description:'个人执行计划，不代表通知原始截止时间。',executionStatus:x.done?'completed':'unsubmitted'}))),'text/calendar;charset=utf-8')});
@@ -250,7 +258,7 @@ function renderRadar(){
     `<div class="notice ${risks.some(r=>r.severity>=3)?'warn':''}">未来48小时有 ${soon.length} 项任务截止，${soon.filter(t=>t.checklist.some(x=>!x.done)).length} 项仍有准备工作未完成。${risks.length?'建议从下方最高风险任务开始处理。':'当前没有需要关注的风险。'}</div><div class="stats-mini"><span><b>${risks.filter(r=>r.severity===4).length}</b>逾期</span><span><b>${risks.filter(r=>r.severity===3).length}</b>紧急</span><span><b>${risks.filter(r=>r.severity===2).length}</b>关注</span><span><b>${risks.filter(r=>r.severity===1).length}</b>准备 / 日期待确认</span></div>
     <section class="panel">${risks.length?risks.map(r=>`<article class="risk-item ${r.severity>=3?'severe':''}"><header><button class="task-title" data-action="detail" data-id="${esc(r.task.id)}">${esc(r.task.title)}</button><span class="tag risk-${r.severity}">${['','准备提醒','需要关注','紧急处理','已过期'][r.severity]}</span></header><p class="small muted">截止：${esc(T.label(r.task))} · 材料进度 ${D.progress(r.task)}%</p><ul>${r.reasons.map(x=>`<li>${esc(x)}</li>`).join('')}</ul><div class="risk-advice">行动建议：${r.suggestions.map(esc).join('；')}。</div></article>`).join(''):empty('当前没有风险任务','完成任务后预警会自动消失。')}</section><p class="small muted" style="margin-top:16px">耗时风险只在你填写“预计耗时”和“截止前剩余可用时间”后计算，不用自然时间代替你的真实可用时间。</p>`;
 }
-function renderSettings(){return head('系统设置','管理AI连接、本地数据和使用偏好。')+`<div class="grid-equal"><div class="stack"><section class="panel"><h2>AI 服务</h2><div class="settings-row"><div><strong>DeepSeek ${health?.deepseekConfigured?'密钥已配置':'待配置密钥'}</strong><p>当前模型：${esc(health?.model||'deepseek-flash')}</p><p>配置状态不代表真实调用成功；测试会发送一次简短请求。</p></div>${button('实际连接测试','test-ai','','primary')}</div><p class="small muted">${['localhost','127.0.0.1','[::1]'].includes(location.hostname)?'本地维护者可用config-api.cmd配置并重启服务。':health?.deepseekConfigured?'AI由服务端配置，访问者无需填写密钥。':'AI暂不可用，请联系维护者；本地任务管理仍可使用。'}密钥不会在页面展示。</p></section><section class="panel"><h2>本地数据与备份</h2><div class="settings-row"><div><strong>导出完整备份</strong><p>包含任务、原始通知、图片、变更与历史。</p></div>${button('导出JSON','export')}</div><div class="settings-row"><div><strong>恢复备份</strong><p>导入前校验格式；确认后替换当前本地数据。</p></div>${button('导入备份','import')}</div><div class="settings-row"><div><strong>体验完整工作流程</strong><p>演示数据明确标注，可单独清除。</p></div>${button('加载演示数据','demo')}</div><div class="settings-row"><div><strong>清空演示数据</strong><p>只删除带“演示”标记的记录。</p></div>${button('清空演示','clear-demo','','danger')}</div><div class="settings-row"><div><strong>清空所有本地数据</strong><p>此操作需确认，建议先导出备份。</p></div>${button('清空全部','clear-all','','danger')}</div></section></div><div class="stack"><section class="panel"><h2>外观与基础使用</h2><div class="settings-row"><div><strong>${state.theme==='dark'?'深色':'浅色'}主题</strong><p>主题会保存在当前浏览器。</p></div>${button('切换明暗','theme')}</div><div class="notice">1. 上传图片或粘贴通知 → AI拆出多个事项。<br>2. 检查原文与日期 → 编辑后加入任务。<br>3. 在任务详情独立勾选材料、确认截止日期。<br>4. 新通知有变化时关联旧任务 → 比较后接受或拒绝。<br>5. 日历、工作台与风险雷达自动联动。</div><p class="small muted">本地数据保存在当前网址、当前浏览器的IndexedDB。换浏览器、换端口不会自动迁移；清除网站数据会删除记录，请定期备份。通知图片只在识别时发给DeepSeek。</p></section><section class="panel"><h2>关于作品</h2><div class="settings-row"><div><strong>Deadline Hunter——AI校园信息捕手</strong><p>智慧校园AI信息管理与任务执行平台</p></div></div><div class="settings-row"><div><strong>开发团队：路边队</strong><p>参赛人数：3人 · 参赛赛道：智慧校园</p></div><span class="tag">V2.4.2</span></div><p class="small muted" style="margin-top:15px">创新闭环：校园信息捕捉 → 多任务理解 → 通知关联与变更确认 → 材料准备 → 风险分析 → 行动执行。</p></section></div></div>`;}
+function renderSettings(){return head('系统设置','管理AI连接、本地数据和使用偏好。')+`<div class="grid-equal"><div class="stack"><section class="panel"><h2>AI 服务</h2><div class="settings-row"><div><strong>DeepSeek ${health?.deepseekConfigured?'密钥已配置':'待配置密钥'}</strong><p>当前模型：${esc(health?.model||'deepseek-flash')}</p><p>配置状态不代表真实调用成功；测试会发送一次简短请求。</p></div>${button('实际连接测试','test-ai','','primary')}</div><p class="small muted">${['localhost','127.0.0.1','[::1]'].includes(location.hostname)?'本地维护者可用config-api.cmd配置并重启服务。':health?.deepseekConfigured?'AI由服务端配置，访问者无需填写密钥。':'AI暂不可用，请联系维护者；本地任务管理仍可使用。'}密钥不会在页面展示。</p></section><section class="panel"><h2>本地数据与备份</h2><div class="settings-row"><div><strong>导出完整备份</strong><p>包含任务、原始通知、图片、变更与历史。</p></div>${button('导出JSON','export')}</div><div class="settings-row"><div><strong>恢复备份</strong><p>先校验并预览摘要，再选择合并或替换；替换需再次确认。</p></div>${button('导入备份','import')}</div><div class="settings-row"><div><strong>体验完整工作流程</strong><p>演示数据明确标注，可单独清除。</p></div>${button('加载演示数据','demo')}</div><div class="settings-row"><div><strong>清空演示数据</strong><p>只删除带“演示”标记的记录。</p></div>${button('清空演示','clear-demo','','danger')}</div><div class="settings-row"><div><strong>清空所有本地数据</strong><p>此操作需确认，建议先导出备份。</p></div>${button('清空全部','clear-all','','danger')}</div></section></div><div class="stack"><section class="panel"><h2>外观与基础使用</h2><div class="settings-row"><div><strong>${state.theme==='dark'?'深色':'浅色'}主题</strong><p>主题会保存在当前浏览器。</p></div>${button('切换明暗','theme')}</div><div class="notice">1. 上传图片或粘贴通知 → AI拆出多个事项。<br>2. 检查原文与日期 → 编辑后加入任务。<br>3. 在任务详情独立勾选材料、确认截止日期。<br>4. 新通知有变化时关联旧任务 → 比较后接受或拒绝。<br>5. 日历、工作台与风险雷达自动联动。</div><p class="small muted">本地数据保存在当前网址、当前浏览器的IndexedDB。换浏览器、换端口不会自动迁移；清除网站数据会删除记录，请定期备份。通知图片只在识别时发给DeepSeek。</p></section><section class="panel"><h2>关于作品</h2><div class="settings-row"><div><strong>Deadline Hunter——AI校园信息捕手</strong><p>智慧校园AI信息管理与任务执行平台</p></div></div><div class="settings-row"><div><strong>开发团队：路边队</strong><p>参赛人数：3人 · 参赛赛道：智慧校园</p></div><span class="tag">V2.4.2</span></div><p class="small muted" style="margin-top:15px">创新闭环：校园信息捕捉 → 多任务理解 → 通知关联与变更确认 → 材料准备 → 风险分析 → 行动执行。</p></section></div></div>`;}
 function renderSource(source){if(!source)return '<p class="small muted">手动创建，或来源记录不存在。</p>';return `<div class="inline-source"><strong>${esc(source.name)}</strong> · ${esc(new Date(source.createdAt).toLocaleString('zh-CN'))}${source.demo?' · 演示数据':''}</div>${source.image&&/^data:image\/(png|jpeg|webp|gif);base64,/.test(source.image)?`<img class="source-image" src="${esc(source.image)}" alt="原始通知图片">`:''}${source.text?`<pre class="source-text">${esc(source.text)}</pre>`:''}`;}
 function openTask(id,edit=false,day=''){
   currentTaskId=id||null;const task=state.tasks.find(t=>t.id===id);
@@ -293,7 +301,45 @@ async function handleChange(id,accept){
 function download(name,content,type){const blob=new Blob([content],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),3000);}
 async function checkHealth(){const wake=setTimeout(()=>{$('#connection').textContent='服务正在唤醒，请稍候…';},5000);try{const response=await fetch('/api/health',{cache:'no-store',signal:AbortSignal.timeout(70000)});if(!response.ok)throw new Error();health=await response.json();if(!health.version?.startsWith('2.'))throw new Error();$('#connection').textContent=health.deepseekConfigured?'服务已连接 · DeepSeek已配置':'服务已连接 · 密钥待配置';$('#connection').classList.toggle('ok',health.deepseekConfigured);}catch{$('#connection').textContent=navigator.onLine?'服务未连接 · 本地可用':'离线模式 · 本地可用';health=null;}finally{clearTimeout(wake);}if(page==='settings')render();}
 async function testAI(el){el.disabled=true;el.textContent='正在发送测试请求…';try{const response=await fetch('/api/test-connection',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}),payload=await response.json();if(!response.ok)throw new Error(payload.error);toast(payload.message);}catch(error){toast(error.message||'连接失败',true);}finally{el.disabled=false;el.textContent='实际连接测试';}}
-async function importBackup(file){if(!file)return;try{if(file.size>150*1024*1024)throw new Error('备份超过150 MB');const next=D.validateBackup(JSON.parse(await file.text()));if(!await confirmAction('恢复此备份？',`将使用备份中的 ${next.tasks.length} 项任务替换当前全部数据。建议先导出当前备份。`))return;await mutate(s=>{Object.keys(s).forEach(k=>delete s[k]);Object.assign(s,next);},'备份已恢复');}catch(error){toast(error.message||'备份读取失败',true);}finally{$('#importFile').value='';}}
+function backupChoice(next){
+  const info=B.summary(next),dialog=$('#backupDialog');
+  dialog.innerHTML=`<div class="dialog-head"><h2 id="backupTitle">备份校验通过</h2></div><div class="dialog-body"><p>任务数：${info.count}</p><p>最早截止日：${esc(info.earliest||'无已知截止日期')}</p><p>最晚截止日：${esc(info.latest||'无已知截止日期')}</p><p>合并保留当前数据；同 ID 不同内容会保留两份。替换将恢复备份内全部数据与偏好。</p></div><div class="dialog-foot"><button class="button" data-backup-mode="cancel">取消</button><button class="button" data-backup-mode="replace">替换全部</button><button class="button primary" data-backup-mode="merge">合并进现有任务</button></div>`;
+  return new Promise(resolve=>{
+    let mode='cancel';
+    const click=e=>{const btn=e.target.closest('[data-backup-mode]');if(btn){mode=btn.dataset.backupMode;dialog.close();}};
+    const cancel=()=>{mode='cancel';if(dialog.open)dialog.close();};
+    dialog.addEventListener('click',click);dialog.addEventListener('cancel',cancel);
+    dialog.addEventListener('close',()=>{dialog.removeEventListener('click',click);dialog.removeEventListener('cancel',cancel);resolve(mode);},{once:true});
+    dialog.showModal();
+  });
+}
+async function importBackup(file){
+  if(!file||backupImportBusy)return;
+  backupImportBusy=true;
+  try{
+    if(file.size>150*1024*1024)throw new Error('备份超过150 MB');
+    const incoming=B.parse(await file.text()),mode=await backupChoice(incoming);
+    if(mode==='cancel')return;
+    if(mode==='replace'&&!await confirmAction('确认替换全部本地数据？','当前任务、通知、变更和历史将被替换。建议先取消并导出当前备份。'))return;
+    await mutate(s=>{const next=B.prepare(s,incoming,mode);Object.keys(s).forEach(k=>delete s[k]);Object.assign(s,next);},mode==='merge'?'备份已合并':'备份已替换');
+  }catch(error){toast(error.message||'备份读取失败，当前数据未改变',true);}
+  finally{backupImportBusy=false;$('#importFile').value='';}
+}
+async function exportBackup(){
+  if(saveBusy){toast('正在保存，请稍候');return;}
+  const snapshot=structuredClone(state),body=JSON.stringify(snapshot,null,2),bytes=new Blob([body]).size;
+  if(bytes>5*1024*1024&&!await confirmAction('备份包含原图',`备份约${(bytes/1024/1024).toFixed(1)} MB，包含图片与原文。确认继续导出？`))return;
+  try{
+    download('Deadline-Hunter-Backup.json',body,'application/json');
+    // Browser APIs cannot confirm a file was kept; record only that download was initiated.
+    const meta={lastExportAt:stamp(),changes:B.changed(snapshot.tasks,state.tasks)};
+    if(saveBusy){toast('已发起下载；正在保存任务，备份时间未更新，请稍后重试');return;}
+    saveBusy=true;
+    try{await CampusStore.write(state,meta);backupMeta=meta;backupDismissed=false;channel?.postMessage({revision});render();}
+    finally{saveBusy=false;}
+    toast(`已发起备份下载：${snapshot.tasks.length} 项任务，${bytes<1024*1024?(bytes/1024).toFixed(1)+' KB':(bytes/1024/1024).toFixed(2)+' MB'}，请确认文件已保存`);
+  }catch(error){toast('导出或记录备份时间失败：'+error.message,true);}
+}
 async function loadDemo(){
   if(state.tasks.some(x=>x.demo)){toast('演示数据已存在，可先清除后重新加载');return;}
   const at=hours=>T.local(Date.now()+hours*3600000);
@@ -371,7 +417,8 @@ document.addEventListener('click',async e=>{
     case 'accept-change':await handleChange(id,true);break;
     case 'reject-change':await handleChange(id,false);break;
     case 'test-ai':await testAI(target);break;
-    case 'export':{const body=JSON.stringify(state,null,2),bytes=new Blob([body]).size;if(bytes>5*1024*1024&&!await confirmAction('备份包含原图',`备份约${(bytes/1024/1024).toFixed(1)} MB，包含图片与原文。确认继续导出？`))break;download('Deadline-Hunter-Backup.json',body,'application/json');toast('已导出备份，请妥善保存通知原文');break;}
+    case 'dismiss-backup':backupDismissed=true;render();break;
+    case 'export':await exportBackup();break;
     case 'import':$('#importFile').click();break;
     case 'demo':await loadDemo();break;
     case 'clear-demo':if(await confirmAction('清空演示数据？','只清除标注为演示的任务、通知、变更与关联历史。'))await mutate(next=>{const ids=new Set(next.tasks.filter(t=>t.demo).map(t=>t.id));next.tasks=next.tasks.filter(t=>!t.demo);next.sources=next.sources.filter(s=>!s.demo);next.changes=next.changes.filter(c=>!ids.has(c.taskId));next.history=next.history.filter(h=>!ids.has(h.taskId));},'演示数据已清除');break;
@@ -390,6 +437,6 @@ window.addEventListener('hashchange',()=>{routeRevision++;closeDialogs();syncDra
 window.addEventListener('dragover',e=>{e.preventDefault();});window.addEventListener('drop',e=>e.preventDefault());
 setInterval(()=>{if(state&&['dashboard','radar'].includes(page)&&!saveBusy&&!$('#taskDialog').open)render();},60000);
 setInterval(()=>{if(state)window.DHPush?.sync(state.tasks);},60000);
-(async()=>{try{state=await CampusStore.read();page=pages[location.hash.slice(1)]?location.hash.slice(1):'dashboard';render();await checkHealth();}catch(error){app.innerHTML=`<section class="panel"><h1>本地工作空间无法打开</h1><p class="error">${esc(error.message)}</p><p>请通过 start.bat 启动，并使用支持IndexedDB的浏览器普通窗口。</p></section>`;}})();
+(async()=>{try{state=await CampusStore.read();backupMeta=await CampusStore.readBackupMeta();page=pages[location.hash.slice(1)]?location.hash.slice(1):'dashboard';render();await checkHealth();}catch(error){app.innerHTML=`<section class="panel"><h1>本地工作空间无法打开</h1><p class="error">${esc(error.message)}</p><p>请通过 start.bat 启动，并使用支持IndexedDB的浏览器普通窗口。</p></section>`;}})();
 
 document.querySelector('#videoDialog').addEventListener('close',()=>document.querySelector('#demoVideo').pause());
