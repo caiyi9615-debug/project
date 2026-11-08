@@ -53,7 +53,7 @@ window.DHSimple=(()=>{
   for(const button of d.querySelectorAll('[data-guide]'))button.onclick=()=>{d.close();if(button.dataset.guide==='tasks')location.hash='tasks';if(button.dataset.guide==='plan')window.DHAdvisor.open();};d.showModal();
  }
  function tidy(page,app){
-  if(page==='settings')for(const panel of [...app.querySelectorAll('section.panel')]){const h=panel.querySelector('h2');if(panel.hidden||!h||['AI 服务','页面本地提醒'].includes(h.textContent))continue;const details=document.createElement('details');details.className='fold-panel';details.innerHTML=`<summary>${e(h.textContent)}</summary>`;panel.before(details);h.remove();details.append(panel);}
+  if(page==='settings')for(const panel of [...app.querySelectorAll('section.panel')]){const h=panel.querySelector('h2');if(panel.hidden||!h||['AI 服务','页面本地提醒','本地数据与备份'].includes(h.textContent))continue;const details=document.createElement('details');details.className='fold-panel';details.innerHTML=`<summary>${e(h.textContent)}</summary>`;panel.before(details);h.remove();details.append(panel);}
   if(page==='radar')for(const item of app.querySelectorAll('.risk-item')){const details=document.createElement('details');details.className='risk-explanation';details.innerHTML='<summary>查看依据与建议</summary>';for(const el of [...item.querySelectorAll('ul,.risk-advice')])details.append(el);item.append(details);}
  }
  document.addEventListener('click',ev=>{for(const menu of document.querySelectorAll('.row-more[open],.filter-more[open]'))if(!menu.contains(ev.target))menu.open=false;});

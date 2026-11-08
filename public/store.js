@@ -27,15 +27,24 @@ window.CampusStore = (() => {
       request.onerror=()=>reject(new Error('读取本地数据失败。'));
     });
   }
-  async function write(state) {
+  async function readBackupMeta() {
+    if(!db)await open();
+    return new Promise((resolve,reject)=>{
+      const tx=db.transaction('state','readonly'),request=tx.objectStore('state').get('backupMeta');
+      request.onsuccess=()=>resolve(request.result||{lastExportAt:null,changes:0});
+      request.onerror=()=>reject(new Error('读取备份记录失败。'));
+    });
+  }
+  async function write(state,backupMeta) {
     if(!db)await open();
     return new Promise((resolve,reject)=>{
       const tx=db.transaction('state','readwrite');
       tx.objectStore('state').put(structuredClone(state),'main');
+      if(backupMeta)tx.objectStore('state').put(structuredClone(backupMeta),'backupMeta');
       tx.oncomplete=()=>resolve();
       tx.onabort=()=>reject(new Error('本地保存失败，可能存储空间不足。请导出备份并释放空间。'));
       tx.onerror=()=>{};
     });
   }
-  return {read,write};
+  return {read,write,readBackupMeta};
 })();
