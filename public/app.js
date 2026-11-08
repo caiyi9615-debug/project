@@ -1,6 +1,7 @@
 'use strict';
 const D=window.DH;
 const T=window.DHTime;
+const R=window.DHRecognition,U=window.DHUncertainty;
 const $=selector=>document.querySelector(selector);
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const icon=(name)=>`<svg viewBox="0 0 24 24" aria-hidden="true">${({dashboard:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',capture:'<path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5Z"/>',tasks:'<rect x="5" y="4" width="15" height="17" rx="2"/><path d="M9 4V2h7v2M9 10h7M9 15h7"/>',calendar:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 10h18M8 14h1m6 0h1m-8 4h1"/>',changes:'<path d="M3 8h14l-4-4M21 16H7l4 4M17 8l-4 4M7 16l4-4"/>',radar:'<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><path d="m12 12 7-7M12 12v.01"/>',settings:'<path d="M12 3v3m0 12v3M3 12h3m12 0h3M6 6l2 2m8 8 2 2M6 18l2-2m8-8 2-2"/><circle cx="12" cy="12" r="5"/>',upload:'<path d="M4 16v4h16v-4M12 16V3m-5 5 5-5 5 5"/>'})[name]||'<circle cx="12" cy="12" r="8"/>'}</svg>`;
@@ -17,7 +18,7 @@ let currentTaskId=null,toastTimer,revision=0,routeRevision=0;
 const app=$('#app');
 function closeDialogs(){
   window.DHQuickAdd?.close();
-  for(const id of ['confirmDialog','timeDialog','duplicateDialog','advisorDialog','planDialog','taskDialog','guideDialog','videoDialog']){
+  for(const id of ['uncertaintyDialog','confirmDialog','timeDialog','duplicateDialog','advisorDialog','planDialog','taskDialog','guideDialog','videoDialog']){
     const modal=document.getElementById(id);if(!modal?.open)continue;
     if(!['taskDialog','planDialog','advisorDialog','guideDialog','videoDialog'].includes(id))modal.dispatchEvent(new Event('cancel'));
     if(modal.open)modal.close();
@@ -59,7 +60,7 @@ function render(){
   if(page==='capture')wireCapture();
   window.DHPlannerUI?.mount({app,page,getState:()=>state,getDraft:id=>capture.drafts.find(x=>x.id===id),mutate,toast,confirm:confirmAction,refreshTask:id=>{if($('#taskDialog').open&&currentTaskId===id)openTask(id);},exportPlan:task=>download('Deadline-Hunter-执行计划.ics',D.ics(task.plan.items.filter(x=>x.date).map(x=>D.cleanTask({id:task.id+'-'+x.id,title:task.title+' · '+x.title+'（计划安排，非截止）',dueDate:x.date,deadlineKind:'date',description:'个人执行计划，不代表通知原始截止时间。',executionStatus:x.done?'completed':'unsubmitted'}))),'text/calendar;charset=utf-8')});
   window.DHExperience?.mount({app,page,getState:()=>state,capture,mutate,toast,loadDemo,prepareDemoCapture});
-  DHQuickAdd.mount({getState:()=>state,mutate,toast,openManual:()=>openTask(null,true),confirm:confirmAction,duplicate:duplicateChoice});
+  DHQuickAdd.mount({getState:()=>state,mutate,toast,openManual:()=>openTask(null,true),confirm:confirmAction,duplicate:duplicateChoice,segment:continueQuickSegments});
   DHSimple.tidy(page,app);
 }
 function prepareDemoCapture(){if(capture.drafts.length||capture.text||capture.image)return;const task=state.tasks.find(t=>t.demo&&t.dueAt);if(!task)return;const text=`【示例回放，非实时AI】${task.title}：${task.dueAt.replace('T',' ')}前提交。`;capture.text=text;capture.drafts=[D.cleanTask({...task,id:D.uid(),evidence:text,dateText:task.dueAt.replace('T',' '),demo:true})];capture.source={id:D.uid(),kind:'text',name:'示例识别回放（非实时AI）',text,image:'',demo:true,createdAt:stamp()};capture.reviewed=true;render();}
@@ -70,15 +71,15 @@ function renderCapture(){
     (location.protocol==='file:'?'<div class="notice warn">请先运行 start.bat，从 http://127.0.0.1:8790 使用；直接打开文件无法调用AI和保存数据。</div>':'')+
     `<div class="ai-grid capture-workspace"><section class="panel capture-input"><div class="panel-head"><h2>捕捉一条校园通知</h2><span class="capture-provider">DeepSeek</span></div><div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="选择或拖入通知图片">${icon('upload')}<strong>拖拽图片到这里，或点击上传</strong><span>PNG、JPG、JPEG、WEBP、GIF · 单张最大10 MB</span></div><input id="imageFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
     ${capture.image?`<div class="preview"><img src="${esc(capture.image)}" alt="通知原图预览"><div><strong>${esc(capture.file?.name||'通知图片')}</strong><small>${((capture.file?.size||0)/1024).toFixed(1)} KB</small><div class="actions">${button('替换','replace-image','','text compact')}${button('移除','remove-image','','danger compact')}</div></div></div>`:''}
-    <div class="separator">或粘贴通知文字（可与图片一起提交）</div><label class="field"><span>通知原文</span><textarea id="noticeText" rows="5" maxlength="20000" placeholder="将课程群、班级通知或校园公告文字粘贴到这里…">${esc(capture.text)}</textarea></label><p class="capture-time-note">${icon('calendar')}<span>缺少年份、具体时刻或截图时间时，会请你核实；待核实也能保存。</span></p>
-    ${capture.error?`<p class="error capture-error" role="alert">${esc(capture.error)}</p>`:''}<button class="button primary wide" data-action="analyze" ${busy?'disabled':''}>${busy?'<span class="spinner"></span>正在提取事项…':`${icon('capture')} 开始AI识别`}</button><p class="capture-privacy">${busy?'请保持页面打开，最长等待90秒。':'上传内容将发送至 DeepSeek；识别结果保存后，原文证据留在本机浏览器。'}</p></section>
-    <section class="panel capture-results ${capture.drafts.length?'has-drafts':''}" aria-busy="${busy}"><div class="panel-head"><h2>待确认事项 ${capture.drafts.length?`<span class="result-count">${capture.drafts.length}项</span>`:''}</h2>${capture.drafts.length?`<div class="actions">${button('批量核实时间/状态','review-time','','compact')}${button('全部加入任务','add-all','','primary compact')}</div>`:''}</div>${capture.drafts.length?`<p class="small muted">时间待核实也能保存。展开单项编辑；相似任务先比较，再决定更新或新增。</p>${capture.drafts.map(renderDraft).join('')}`:`<div class="capture-placeholder ${busy?'is-busy':''}" role="status"><div class="capture-result-icon">${icon('tasks')}${busy?'<span class="capture-status-dot"></span>':''}</div><h3>${busy?'正在理解通知内容':'这里将显示可编辑的识别结果'}</h3><p>${busy?'分别提取时间依据、课程和执行状态。':'支持一张截图多个事项，已完成/待批阅不会混入未提交催办。'}</p>${busy?'<div class="capture-progress" role="status"><span>准备数据 ✓</span><span class="active">AI识别中</span><span>等待结果校验</span></div>':''}<div class="capture-skeleton" aria-hidden="true">${[0,1,2].map(()=>'<div><i></i><span><b></b><em></em></span></div>').join('')}</div><small>${busy?'请保持页面打开，最长等待90秒。':'上传或粘贴通知后，点击「开始AI识别」'}</small></div>`}</section></div>`;
+    <div class="separator">或粘贴通知文字（可与图片一起提交）</div><label class="field"><span>通知原文</span><textarea id="noticeText" ${busy?'disabled':''} rows="5" maxlength="20000" placeholder="将课程群、班级通知或校园公告文字粘贴到这里…">${esc(capture.text)}</textarea></label><p class="capture-time-note">${icon('calendar')}<span>缺少年份、日期或时刻会标为待确认；保存前请核对，无法核实可明确保留无日期的待核实任务。</span></p>
+    ${capture.error?`<p class="error capture-error" role="alert">${esc(capture.error)}</p>${capture.segment||/截断/.test(capture.error)?button(capture.segment?'继续分段识别':'分段识别','segment-analyze','','wide'):''}`:''}<button class="button primary wide" data-action="analyze" ${busy?'disabled':''}>${busy?'<span class="spinner"></span>正在提取事项…':`${icon('capture')} 开始AI识别`}</button><p class="capture-privacy">${busy?(capture.progress||'请保持页面打开，单次请求最长等待90秒。'):'上传内容将发送至 DeepSeek；识别失败也会保留通知文字和截图。'}</p></section>
+    <section class="panel capture-results ${capture.drafts.length?'has-drafts':''}" aria-busy="${busy}"><div class="panel-head"><h2>待确认事项 ${capture.drafts.length?`<span class="result-count">${capture.drafts.length}项</span>`:''}</h2>${capture.drafts.length?`<div class="actions">${button('批量核实时间/状态','review-time','','compact')}${button('全部加入任务','add-all','','primary compact')}</div>`:''}</div>${capture.drafts.length?`<p class="small muted">黄色标记需要核对。保存前请确认或修改；原文信息不足时，可明确不设置推测日期。</p>${capture.drafts.map(renderDraft).join('')}`:`<div class="capture-placeholder ${busy?'is-busy':''}" role="status"><div class="capture-result-icon">${icon('tasks')}${busy?'<span class="capture-status-dot"></span>':''}</div><h3>${busy?'正在理解通知内容':'这里将显示可编辑的识别结果'}</h3><p>${busy?'分别提取时间依据、课程和执行状态。':'支持一张截图多个事项，已完成/待批阅不会混入未提交催办。'}</p>${busy?'<div class="capture-progress" role="status"><span>准备数据 ✓</span><span class="active">AI识别中</span><span>等待结果校验</span></div>':''}<div class="capture-skeleton" aria-hidden="true">${[0,1,2].map(()=>'<div><i></i><span><b></b><em></em></span></div>').join('')}</div><small>${busy?'请保持页面打开，最长等待90秒。':'上传或粘贴通知后，点击「开始AI识别」'}</small></div>`}</section></div>`;
 }
 function renderDraft(t,index){
   const matches=D.candidates({...t,sourceFingerprint:capture.source?.fingerprint},state.tasks,state.sources,state.history);
-  return `<article class="draft-card compact-draft" data-draft="${esc(t.id)}"><header><div><strong>${esc(t.title)}</strong><p class="small muted">${esc(t.course||'课程未识别')} · ${esc(capture.source?.name||'AI识别来源')}</p></div><span class="tag ${T.completed(t)?'done':''}">${esc(T.statuses[t.executionStatus]||'未知')}</span></header><p class="draft-time">${esc(T.label(t))}</p>${matches.length?`<p class="small duplicate-hint">发现 ${matches.length} 个可能重复/关联事项，保存时可比较差异</p>`:''}
+  return `<article class="draft-card compact-draft" data-draft="${esc(t.id)}"><header><div><strong>${esc(t.title)}</strong><p class="small muted">${esc(t.course||'课程未识别')} · ${esc(capture.source?.name||'AI识别来源')}</p></div><span class="tag ${T.completed(t)?'done':''}">${esc(T.statuses[t.executionStatus]||'未知')}</span></header><p class="draft-time">${esc(T.label(t))}</p>${U.markup(t)}${matches.length?`<p class="small duplicate-hint">发现 ${matches.length} 个可能重复/关联事项，保存时可比较差异</p>`:''}
   <details class="draft-details"><summary>展开编辑与时间证据</summary><div class="form-grid">
-  ${inputField('title','任务标题',t.title,'text',true)}${inputField('course','所属课程',t.course,'text',true)}${selectField('category','分类',D.categories,t.category)}${statusField(t.executionStatus)}${deadlineFields(t)}${inputField('startsAt','活动开始时间',t.startsAt,'datetime-local')}${inputField('location','地点',t.location)}${selectField('priority','优先级',['高','中','低'],t.priority)}${inputField('dateText','原始时间表述',t.dateText,'text',true)}${textField('description','任务说明',t.description)}${textField('checklist','材料 / 准备清单（每行一项）',t.checklist.map(x=>x.text).join('\n'))}${textField('notes','注意事项',t.notes)}${textField('evidence','原文证据',t.evidence)}${textField('uncertain','不确定信息（每行一项）',t.uncertain.join('\n'))}</div><label class="check-label"><input name="dateConfirmed" type="checkbox" ${t.dateConfirmed?'checked':''}>已核实时间依据（未核实也允许保存）</label>${timeEvidenceHTML(t)}
+  ${inputField('title','任务标题',t.title,'text',true)}${inputField('course','所属课程',t.course,'text',true)}${selectField('category','分类',D.categories,t.category)}${statusField(t.executionStatus)}${deadlineFields(t)}${inputField('startsAt','活动开始时间',t.startsAt,'datetime-local')}${inputField('location','地点',t.location)}${selectField('priority','优先级',['高','中','低'],t.priority)}${inputField('dateText','原始时间表述',t.dateText,'text',true)}${textField('description','任务说明',t.description)}${textField('checklist','材料 / 准备清单（每行一项）',t.checklist.map(x=>x.text).join('\n'))}${textField('notes','注意事项',t.notes)}${textField('evidence','原文证据',t.evidence)}${textField('uncertain','不确定信息（每行一项）',t.uncertain.join('\n'))}</div><label class="check-label"><input name="dateConfirmed" type="checkbox" ${t.dateConfirmed?'checked':''}>已对照原文核实日期、年份与时刻</label>${timeEvidenceHTML(t)}
   <label class="field"><span>选择已有任务进行关联</span><select name="target"><option value="">选择已有任务…</option>${state.tasks.map(old=>`<option value="${esc(old.id)}" ${t.targetId===old.id?'selected':''}>${matches.some(x=>x.task.id===old.id)?'可能相关 · ':''}${esc(old.title)} ${esc(old.course||'')}</option>`).join('')}</select></label>${button('比较并创建变更确认','compare-draft',`data-id="${esc(t.id)}"`,'text compact')}</details>
   <div class="actions">${button('加入任务中心','add-draft',`data-id="${esc(t.id)}"`,'primary compact')}${button('核实本项','review-one',`data-id="${esc(t.id)}"`,'compact')}${button('删除此项','discard-draft',`data-id="${esc(t.id)}"`,'text compact danger')}</div></article>`;
 }
@@ -132,36 +133,96 @@ async function chooseImage(file){
   try{
     const image=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('读取图片失败'));reader.readAsDataURL(file);});
     await new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve();img.onerror=()=>reject(new Error('图片内容损坏或无法解码，请更换图片'));img.src=image;});
-    capture.file=file;capture.image=image;capture.error='';capture.drafts=[];capture.source=null;capture.baseAt='';capture.reviewed=false;if(page==='capture')render();
+    capture.file=file;capture.image=image;capture.error='';capture.segment=null;capture.drafts=[];capture.source=null;capture.baseAt='';capture.reviewed=false;if(page==='capture')render();
   }catch(error){toast(error.message,true);}
 }
-async function analyze(){
-  if(busy)return;syncDrafts();
-  if(!capture.image&&!capture.text.trim()){capture.error='请先上传图片或粘贴通知文字。';render();return;}
-  if(capture.drafts.length&&!await confirmAction('重新识别？','当前尚未加入任务的识别结果将被替换。'))return;
-  const input={text:capture.text.trim()};
-  if(capture.image){const match=capture.image.match(/^data:([^;]+);base64,(.+)$/s);input.image={mimeType:match[1],data:match[2]};}
-  const submittedSource={id:D.uid(),name:noticeName(capture.text,capture.file),kind:capture.image?'image':'text',image:capture.image,text:capture.text,createdAt:stamp(),demo:false};
-  busy=true;capture.error='';render();
+async function imageSegments(data){
+  const img=new Image();img.src=data;await img.decode();
+  const width=img.naturalWidth,height=img.naturalHeight;
+  const tileWidth=Math.min(width,1400),tileHeight=Math.min(900,Math.max(1,Math.ceil(height/2)));
+  const parts=[];
+  for(let y=0;y<height;){
+    for(let x=0;x<width;){
+      const w=Math.min(tileWidth,width-x),h=Math.min(tileHeight,height-y),canvas=document.createElement('canvas');
+      canvas.width=w;canvas.height=h;canvas.getContext('2d').drawImage(img,x,y,w,h,0,0,w,h);
+      const data=canvas.toDataURL('image/png').split(',')[1];
+      parts.push({text:'',image:{mimeType:'image/png',data}});
+      if(parts.length>32)throw Error('截图过大，请先裁成较小的通知图片；原图已保留。');
+      if(x+w>=width)break;x+=Math.max(1,w-Math.min(80,Math.floor(w/4)));
+    }
+    if(y+tileHeight>=height)break;y+=Math.max(1,tileHeight-Math.min(80,Math.floor(tileHeight/4)));
+  }
+  return parts;
+}
+async function requestRecognition(input,segmented){
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),95000);
   try{
-    submittedSource.fingerprint=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(submittedSource.image+'\n'+submittedSource.text)))).map(x=>x.toString(16).padStart(2,'0')).join('');
     const response=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json; charset=utf-8'},body:JSON.stringify(input),signal:controller.signal});
-    let payload;try{payload=await response.json();}catch{throw new Error('服务返回的结果无法读取，请确认启动了V2服务。');}
-    if(!response.ok)throw new Error(payload.error||'识别失败');
-    if(!Array.isArray(payload.result?.tasks)||!payload.result.tasks.length)throw new Error('AI未返回任务，请重试。');
-    capture.drafts=payload.result.tasks.map(t=>D.cleanTask(T.resolve(t)));
-    capture.source=submittedSource;
-    toast(`已提取 ${capture.drafts.length} 个事项，请核对后加入任务`);
-    capture.reviewed=false;
-    if(page==='capture'&&capture.drafts.some(TimeReview.needs)){busy=false;render();await reviewTime();}
-  }catch(error){capture.error=error.name==='AbortError'?'识别超时，请检查网络后重试。':error.message;}
-  finally{clearTimeout(timer);busy=false;if(page==='capture')render();}
+    let payload;try{payload=await response.json();}catch{throw Error('AI 结果 JSON 无法解析，通知文字和截图已保留，请直接再次识别。');}
+    if(!response.ok){
+      if(segmented&&response.status===422&&/未识别出可执行事项|没有符合条件的待办/.test(payload.error||''))return [];
+      throw Error((payload.error||'识别失败')+(response.status===429?' 已完成的分段会保留，请稍后继续。':''));
+    }
+    if(!Array.isArray(payload.result?.tasks)||!payload.result.tasks.length)throw Error('AI未返回任务，输入已保留，请再次识别。');
+    return payload.result.tasks.map(t=>D.cleanTask(T.resolve(t)));
+  }finally{clearTimeout(timer);}
 }
+async function continueQuickSegments(input){
+  if(busy)return;
+  if(capture.drafts.length&&!await confirmAction('转到分段识别？','识别中心尚未保存的候选将被替换；快捷添加的原始输入会保留。'))return;
+  capture={file:input.fileName?{name:input.fileName,size:0}:null,image:input.image||'',text:input.text||'',drafts:[],source:null,error:'',baseAt:'',reviewed:false};
+  route('capture');page='capture';render();await analyze(true);
+}
+async function analyze(segmented=false){
+  if(busy)return;syncDrafts();
+  if(!capture.image&&!capture.text.trim()){capture.error='请先上传图片或粘贴通知文字。';render();return;}
+  if(capture.drafts.length&&!await confirmAction('重新识别？','当前尚未加入任务的识别结果将在新结果成功后被替换。'))return;
+  const submittedSource={id:D.uid(),name:noticeName(capture.text,capture.file),kind:capture.image?'image':'text',image:capture.image,text:capture.text,createdAt:stamp(),demo:false};
+  busy=true;capture.error='';capture.progress=segmented?'正在按段落和截图区域分段，原始输入会保留。':'';render();
+  try{
+    submittedSource.fingerprint=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(submittedSource.image+'\n'+submittedSource.text)))).map(x=>x.toString(16).padStart(2,'0')).join('');
+    let tasks;
+    if(segmented){
+      if(!capture.segment||capture.segment.key!==submittedSource.fingerprint){
+        const parts=R.splitText(submittedSource.text,Math.max(1,Math.min(3500,Math.ceil(submittedSource.text.length/2)))).map(text=>({text}));
+        if(submittedSource.image)parts.push(...await imageSegments(submittedSource.image));
+        capture.segment={key:submittedSource.fingerprint,parts,index:0,tasks:[]};
+      }
+      const run=capture.segment;
+      while(run.index<run.parts.length){
+        capture.progress=`逐段识别 ${run.index+1}/${run.parts.length}，已完成 ${run.index} 段。每段独立请求；失败可继续。`;if(page==='capture')render();
+        const part=run.parts[run.index];
+        try{run.tasks.push(...await requestRecognition(part,true));run.index++;}
+        catch(error){
+          // A dense paragraph / screenshot tile may still exceed the same model's
+          // output limit. Split that part further, without redoing completed parts.
+          if(/截断/.test(error.message)&&run.parts.length<32){
+            const smaller=part.image?await imageSegments('data:'+part.image.mimeType+';base64,'+part.image.data):part.text.length>500?R.splitText(part.text,Math.ceil(part.text.length/2)).map(text=>({text})):[];
+            if(smaller.length>1&&run.parts.length+smaller.length-1<=32){run.parts.splice(run.index,1,...smaller);continue;}
+          }
+          throw error;
+        }
+      }
+      tasks=R.mergeTasks(run.tasks);
+      if(!tasks.length)throw Error('分段识别未找到可执行事项；通知文字和截图已保留，请补充内容后再试。');
+    }else{
+      capture.segment=null;
+      const input={text:submittedSource.text.trim()};
+      if(submittedSource.image){const m=submittedSource.image.match(/^data:([^;]+);base64,(.+)$/s);input.image={mimeType:m[1],data:m[2]};}
+      tasks=await requestRecognition(input,false);
+    }
+    capture.drafts=tasks;capture.source=submittedSource;capture.reviewed=false;capture.segment=null;
+    toast(`已提取 ${tasks.length} 个事项${segmented?'（已合并重复结果）':''}，请核对待确认字段后保存`);
+  }catch(error){capture.error=(error.name==='AbortError'?'识别超时，请检查网络后重试。':error.message)+' 通知文字和截图已保留。';}
+  finally{busy=false;capture.progress='';if(page==='capture')render();}
+}
+
 async function addDraft(ids){
   const navigation=routeRevision;
   syncDrafts();
-  if(!capture.reviewed&&capture.drafts.some(t=>ids.includes(t.id)&&TimeReview.needs(t))){if(!await reviewTime(ids))return;}
+  const checked=await U.confirmTasks(capture.drafts.filter(t=>ids.includes(t.id)));
+  if(!checked)return;
+  capture.drafts=capture.drafts.map(t=>checked.find(x=>x.id===t.id)||t);
   if(navigation!==routeRevision)return;
   const selected=[],invalid=[];
   for(const t of capture.drafts.filter(t=>ids.includes(t.id))){try{selected.push(D.cleanTask(t,{strict:true}));}catch(error){invalid.push(t.id);}}
@@ -219,6 +280,8 @@ function duplicateChoice(task,matches){return new Promise(resolve=>{
 async function compareDraft(id){
   syncDrafts();const draft=capture.drafts.find(t=>t.id===id),target=state.tasks.find(t=>t.id===draft?.targetId);
   if(!target){toast('请先选择需要关联的已有任务',true);return;}
+  const navigation=routeRevision,checked=await U.confirmTasks([draft]);if(!checked||navigation!==routeRevision)return;
+  Object.assign(draft,checked[0]);
   let proposed;try{proposed=D.cleanTask({...draft,id:target.id,plan:target.plan},{strict:true});}catch(error){toast(error.message,true);return;}
   if(!D.differences(target,proposed).length){toast('新旧内容没有变化');return;}
   await mutate(next=>{
@@ -287,8 +350,9 @@ async function toggleTask(id){const ok=await mutate(next=>{const t=next.tasks.fi
 async function deleteTask(id){const t=state.tasks.find(x=>x.id===id);if(!t)return;if(!await confirmAction('删除任务？',`将删除“${t.title}”，任务将从日历、工作台及风险雷达移除。`))return;const ok=await mutate(next=>{next.tasks=next.tasks.filter(x=>x.id!==id);next.changes=next.changes.filter(x=>x.taskId!==id);next.history=next.history.filter(x=>x.taskId!==id);},'任务已删除');if(ok)$('#taskDialog').close();}
 async function handleChange(id,accept){
   const c=state.changes.find(x=>x.id===id);if(!c||c.status!=='pending')return;
+  const navigation=routeRevision,checked=accept?await U.confirmTasks([c.proposed]):null;if(accept&&(!checked||navigation!==routeRevision))return;
   if(accept&&!await confirmAction('确认应用通知变更？','新通知字段将更新到关联任务；材料中相同项目的勾选状态会保留，旧内容进入历史记录。'))return;
-  await mutate(next=>{const proposal=next.changes.find(x=>x.id===id);if(accept)D.applyChange(next,proposal);else proposal.status='rejected';},accept?'变更已应用，日历与工作台已同步':'已拒绝变更，原任务保持不变');
+  await mutate(next=>{const proposal=next.changes.find(x=>x.id===id);if(accept){proposal.proposed=checked[0];D.applyChange(next,proposal);}else proposal.status='rejected';},accept?'变更已应用，日历与工作台已同步':'已拒绝变更，原任务保持不变');
 }
 function download(name,content,type){const blob=new Blob([content],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),3000);}
 async function checkHealth(){const wake=setTimeout(()=>{$('#connection').textContent='服务正在唤醒，请稍候…';},5000);try{const response=await fetch('/api/health',{cache:'no-store',signal:AbortSignal.timeout(70000)});if(!response.ok)throw new Error();health=await response.json();if(!health.version?.startsWith('2.'))throw new Error();$('#connection').textContent=health.deepseekConfigured?'服务已连接 · DeepSeek已配置':'服务已连接 · 密钥待配置';$('#connection').classList.toggle('ok',health.deepseekConfigured);}catch{$('#connection').textContent=navigator.onLine?'服务未连接 · 本地可用':'离线模式 · 本地可用';health=null;}finally{clearTimeout(wake);}if(page==='settings')render();}
@@ -328,7 +392,7 @@ document.addEventListener('click',async e=>{
   if(e.target.closest('#sidebar a'))menuOpen(false);
   const target=e.target.closest('[data-action]');if(!target||target.disabled)return;const action=target.dataset.action,id=target.dataset.id;
   if(busy&&['add-draft','add-all','compare-draft','discard-draft'].includes(action)){toast('正在识别，请等本次结果返回后再操作事项');return;}
-  if(page==='capture'&&!['analyze'].includes(action))syncDrafts();
+  if(page==='capture'&&!['analyze','segment-analyze'].includes(action))syncDrafts();
   if(pages[action]){route(action);return;}
   switch(action){
     case 'guide':menuOpen(false);DHSimple.guide();break;
@@ -355,6 +419,7 @@ document.addEventListener('click',async e=>{
     case 'replace-image':$('#imageFile').click();break;
     case 'remove-image':if(!busy){capture.file=null;capture.image='';render();}break;
     case 'analyze':await analyze();break;
+    case 'segment-analyze':await analyze(true);break;
     case 'review-time':await reviewTime();break;
     case 'review-saved':await reviewSavedTimes([id]);break;
     case 'review-saved-all':await reviewSavedTimes(state.tasks.filter(t=>T.actionable(t)&&TimeReview.needs(t)).map(t=>t.id));break;
