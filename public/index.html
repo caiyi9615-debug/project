@@ -15,7 +15,7 @@
   <link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#2563eb">
   <link rel="apple-touch-icon" href="/push-icon-192.png">
   <script src="push-client.js" defer></script>
-  <script src="time.js" defer></script><script src="fidelity.js" defer></script><script src="planner.js" defer></script><script src="domain.js" defer></script><script src="workbench.js" defer></script><script src="inbox-model.js" defer></script><script src="quick-add.js" defer></script><script src="store.js" defer></script><script src="review.js" defer></script><script src="advisor-ui.js" defer></script><script src="planner-ui.js" defer></script><script src="app.js" defer></script>
+  <script src="time.js" defer></script><script src="fidelity.js" defer></script><script src="planner.js" defer></script><script src="domain.js" defer></script><script src="workbench.js" defer></script><script src="inbox-model.js" defer></script><script src="recognition.js" defer></script><script src="uncertainty.js" defer></script><script src="quick-add.js" defer></script><script src="store.js" defer></script><script src="review.js" defer></script><script src="advisor-ui.js" defer></script><script src="planner-ui.js" defer></script><script src="app.js" defer></script>
 </head>
 <body>
   <aside class="sidebar" id="sidebar">
@@ -30,6 +30,7 @@
     <footer>Deadline Hunter V2.5.0 <span>路边队 · 信息有据，行动有序</span></footer>
   </div>
   <dialog id="taskDialog" class="task-dialog"></dialog>
+  <dialog id="uncertaintyDialog" class="task-dialog" aria-labelledby="uncertaintyTitle"></dialog>
   <dialog id="confirmDialog" class="confirm-dialog"></dialog>
   <dialog id="timeDialog" class="task-dialog"></dialog>
   <dialog id="duplicateDialog" class="task-dialog"></dialog>
