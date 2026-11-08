@@ -22,7 +22,7 @@ test('推送订阅只接受已知HTTPS推送服务，拒绝内网SSRF及伪造�
 });
 test('推送消息包含截止与跳转，限时丢弃，显示实际剩余而非固定阶段',()=>{
  const j=jobs([task],'d',now)[4];const p=payload(j,T.epoch('2026-10-28T11:35'));
- assert.match(p.body,/25分钟/);assert.equal(p.url,'/#tasks');assert.equal(p.expires,T.epoch('2026-10-28T11:45'));
+ assert.match(p.body,/25分钟/);assert.equal(p.url,'/#tasks');assert.equal(p.expires,T.epoch('2026-10-28T11:40'));
 });
 test('定时入口校验秘密，发送后确认，失效订阅清理；不泄露秘密',async()=>{
  const envKeys=['SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY','VAPID_PUBLIC_KEY','VAPID_PRIVATE_KEY','VAPID_SUBJECT','PUSH_JOIN_CODE','PUSH_CRON_SECRET'];

@@ -34,31 +34,76 @@ async function rpc(name,args,request=fetch){
 async function send(sub,payload){return require('web-push').sendNotification(subscription(sub),JSON.stringify(payload),{TTL:300,timeout:10000,urgency:'high',vapidDetails:{subject:process.env.VAPID_SUBJECT,publicKey:process.env.VAPID_PUBLIC_KEY,privateKey:process.env.VAPID_PRIVATE_KEY}});}
 function payload(job,now=Date.now()){
  const left=Math.max(1,Math.ceil((Date.parse(job.due_at)-now)/60000));
- return {title:'Deadline Hunter · 截止提醒',body:`${job.title}：距截止约${left}分钟；截止 ${job.due_local.replace('T',' ')}（北京时间）`,tag:job.id,url:'/#tasks',taskId:job.task_id,dueAt:job.due_local,expires:Math.min(Date.parse(job.due_at),Date.parse(job.scheduled_at)+15*60000)};
+ return {title:'Deadline Hunter · 截止提醒',body:`${job.title}：距截止约${left}分钟；截止 ${job.due_local.replace('T',' ')}（北京时间）`,tag:job.id,url:'/#tasks',taskId:job.task_id,dueAt:job.due_local,expires:Math.min(Date.parse(job.due_at),now+5*60000)};
 }
 function createPush({db=rpc,deliver=send,now=()=>Date.now()}={}){
- let running=false;const limits=new Map();
+ let running=false,lastTick=null,lastSuccessAt=null;
+ const startedAt=new Date(now()).toISOString(),limits=new Map(),pendingAcknowledgements=new Map();
+ function cronAuth(req){
+  if(!(process.env.PUSH_CRON_SECRET||'').trim())throw fail('后台提醒定时凭证尚未配置。',503);
+  if(!equal(req.headers.authorization,'Bearer '+process.env.PUSH_CRON_SECRET))throw fail('定时服务凭证无效。',401);
+ }
+ async function tick(){
+  const result={startedAt:new Date(now()).toISOString(),finishedAt:null,ok:null,claimed:0,sent:0,failed:0,skipped:0,error:null};
+  lastTick=result;
+  function failed(message){result.failed++;result.error||=message;}
+  try{
+   if(!config())throw new Error('Push configuration incomplete');
+   // A successful push must never be sent again just because its DB acknowledgement
+   // failed. Reconcile these results BEFORE acquiring any new leases.
+   await Promise.all([...pendingAcknowledgements].map(async([id,args])=>{
+    try{await db('dh_push_finish',args);pendingAcknowledgements.delete(id);}
+    catch{failed('上次推送的发送结果尚未写回云数据库；本次暂停领取，下一次继续确认。');}
+   }));
+   if(!result.failed){
+    const batch=await db('dh_push_claim',{});
+    result.claimed=(batch||[]).length;
+    await Promise.all((batch||[]).map(async job=>{
+     let success=false,expired=false,jobFailed=false,stage='database';
+     try{
+      const device=await db('dh_push_delivery',{p_job:job.id,p_claim:job.claim_id});
+      if(!device||Date.parse(job.due_at)<=now()){result.skipped++;return;}
+      stage='send';
+      await deliver(device.subscription,payload(job,now()));success=true;result.sent++;
+     }catch(e){
+      jobFailed=true;expired=stage==='send'&&[404,410].includes(e.statusCode);
+      failed(stage==='database'?'读取提醒订阅失败；未发送的提醒将在后续 tick 重试。':'推送服务发送失败；仍有效的提醒将在后续 tick 重试，失效订阅会清理。');
+     }finally{
+      const args={p_job:job.id,p_claim:job.claim_id,p_sent:success,p_expired:expired};
+      // Keep only known deliveries / invalid subscriptions; failed sends remain
+      // retryable through the existing database lease.
+      if(success||expired)pendingAcknowledgements.set(job.id,args);
+      try{await db('dh_push_finish',args);pendingAcknowledgements.delete(job.id);}
+      catch{
+       if(!jobFailed)failed('提醒发送结果写回失败；已发送的提醒仅重试确认，不重复推送。');
+      }
+     }
+    }));
+   }
+  }catch{failed(!config()?'后台提醒配置不完整，请检查 Render 环境变量；本次未领取提醒。':'领取提醒失败，云数据库暂不可用；下一次 tick 将重试尚未截止的提醒。');}
+  finally{
+   result.finishedAt=new Date(now()).toISOString();result.ok=result.failed===0;
+   if(result.ok)lastSuccessAt=result.finishedAt;
+  }
+  return {...result,pendingAcknowledgements:pendingAcknowledgements.size};
+ }
  async function handle(req,res,readJson,json,headers){
   const route=req.url;
-  if(route==='/api/push/config'&&req.method==='GET'){json(res,200,{configured:config(),publicKey:config()?process.env.VAPID_PUBLIC_KEY:'',minutes:MINUTES,scheduler:'Supabase Cron 每5分钟；需单独配置，不保证准时'},headers);return;}
-  if(!config())throw fail('后台提醒尚未配置，请按免费推送说明配置云数据库及定时任务。关闭网页后的提醒当前未生效。',503);
+  if(route==='/api/push/config'&&req.method==='GET'){json(res,200,{configured:config(),publicKey:config()?process.env.VAPID_PUBLIC_KEY:'',minutes:MINUTES,scheduler:'外部定时服务每10分钟；需单独配置，不保证准时'},headers);return;}
+  if(route==='/api/push/status'){
+   cronAuth(req);
+   if(req.method!=='GET')throw fail('状态接口只支持GET。',405);
+   json(res,200,{configured:config(),running,startedAt,lastTick:lastTick?{...lastTick}:null,lastSuccessAt,pendingAcknowledgements:pendingAcknowledgements.size},headers);return;
+  }
+  if(route==='/api/push/tick')cronAuth(req);
+  if(route!=='/api/push/tick'&&!config())throw fail('后台提醒尚未配置，请按免费推送说明配置云数据库及定时任务。关闭网页后的提醒当前未生效。',503);
   if(req.method!=='POST')throw fail('请求方式不支持。',405);
   if(!/^application\/json(?:;|$)/i.test(req.headers['content-type']||''))throw fail('请使用JSON请求。',415);
   if(route==='/api/push/tick'){
-   if(!equal(req.headers.authorization,'Bearer '+process.env.PUSH_CRON_SECRET))throw fail('定时服务凭证无效。',401);
-   if(running){json(res,200,{ok:true,busy:true},headers);return;}
+   if(running){json(res,409,{ok:false,busy:true,error:'上一次 tick 仍在执行，请稍后重试。'},headers);return;}
    running=true;
    try{
-    const batch=await db('dh_push_claim',{});let sent=0,failed=0;
-    await Promise.all((batch||[]).map(async job=>{
-     let success=false,expired=false;
-     try{
-      const device=await db('dh_push_delivery',{p_job:job.id,p_claim:job.claim_id});
-      if(!device||Date.parse(job.due_at)<=now()||Date.parse(job.scheduled_at)<now()-15*60000)return;
-      await deliver(device.subscription,payload(job,now()));success=true;sent++;
-     }catch(e){failed++;expired=[404,410].includes(e.statusCode);}
-     finally{await db('dh_push_finish',{p_job:job.id,p_claim:job.claim_id,p_sent:success,p_expired:expired}).catch(()=>{failed++;});}
-    }));json(res,200,{ok:true,claimed:(batch||[]).length,sent,failed},headers);
+    const result=await tick();json(res,result.ok?200:503,result,headers);
    }finally{running=false;}return;
   }
   const body=await readJson(req),device=owner(body?.token);
