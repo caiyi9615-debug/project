@@ -82,7 +82,12 @@ function createServer(){
  const requests=new Map();let windowStart=Date.now(),total=0,active=0;
  function admit(req,res,headers){
   const now=Date.now();if(now-windowStart>=60000){requests.clear();total=0;windowStart=now;}
-  const ip=process.env.RENDER==='true'?String(req.headers['x-forwarded-for']||req.socket.remoteAddress).split(',').at(-1).trim():req.socket.remoteAddress;
+  // Render terminates TLS at its proxy and forwards the original client address as the FIRST
+  // X-Forwarded-For entry. The last entry may be a shared proxy IP. Do not trust
+  // client-supplied forwarding headers outside the Render environment.
+  const forwarded=process.env.RENDER==='true'?req.headers['x-forwarded-for']:null;
+  const first=typeof forwarded==='string'?forwarded.split(',')[0].trim():'';
+  const ip=(first&&require('node:net').isIP(first)?first:req.socket.remoteAddress)||'unknown';
   const count=requests.get(ip)||0,max=Math.max(1,Number(process.env.AI_RATE_LIMIT_PER_MINUTE)||8);
   if(count>=max||total>=60||active>=3){json(res,429,{error:'AI请求较多，请稍后重试。任务管理和本地计划仍可使用。'},{...headers,'Retry-After':'60'});return false;}
   requests.set(ip,count+1);total++;active++;res.once('close',()=>active--);return true;

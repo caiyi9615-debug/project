@@ -13,7 +13,9 @@ test('multi-task schema, invalid JSON fields and unknown dates',()=>{
   assert.throws(()=>validateOutput({tasks:[]}),/未识别/);assert.throws(()=>validateOutput({tasks:[{title:'x',checklist:'wrong',uncertain:[]}]}),/不完整/);
 });
 test('risk rules cover overdue, 24h, 72h, concentration, preparation and provided capacity',()=>{
-  const now=new Date('2026-10-25T12:00');const tasks=[task({dueAt:'2026-10-24T12:00'}),task({dueAt:'2026-10-25T18:00',estimatedHours:4,availableHours:1}),task({dueAt:'2026-10-27T18:00'}),task({dueAt:'2026-10-27T20:00'})];
+  // Use an explicit China Standard Time offset: a timezone-less Date string is
+  // parsed in the runner's local timezone (UTC on GitHub Actions), shifting risk windows.
+  const now=new Date('2026-10-25T12:00:00+08:00');const tasks=[task({dueAt:'2026-10-24T12:00'}),task({dueAt:'2026-10-25T18:00',estimatedHours:4,availableHours:1}),task({dueAt:'2026-10-27T18:00'}),task({dueAt:'2026-10-27T20:00'})];
   const risks=D.risks(tasks,now);assert.equal(risks[0].severity,4);assert.ok(risks.some(r=>r.reasons.some(x=>x.includes('24 小时'))));assert.ok(risks.some(r=>r.reasons.some(x=>x.includes('3 天'))));assert.ok(risks.some(r=>r.reasons.some(x=>x.includes('集中'))));assert.ok(risks.some(r=>r.reasons.some(x=>x.includes('可用'))));
   assert.equal(D.risks([task({dueAt:'2026-10-25T18:00',status:'done'})],now).length,0);
   assert.ok(!D.risks([task({estimatedHours:100,availableHours:null})],now).some(r=>r.reasons.some(x=>x.includes('预计需'))));
