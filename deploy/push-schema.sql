@@ -62,7 +62,8 @@ begin
  where j.id in (
   select q.id from dh_push_jobs q
   where q.sent_at is null and (q.lease_until is null or q.lease_until<now())
-   and q.scheduled_at<=now() and q.scheduled_at>=now()-interval '15 minutes' and q.due_at>now()
+   -- 补发错过的阶段，直到任务截止；sent_at 与租约继续保证去重领取。
+   and q.scheduled_at<=now() and q.due_at>now()
   order by q.scheduled_at limit 20 for update skip locked
  ) returning j.*;
 end $$;
@@ -78,7 +79,7 @@ begin
  if p_expired then
   delete from dh_push_devices where token_hash in(select device from dh_push_jobs where id=p_job and claim_id=p_claim);
  else
-  update dh_push_jobs set sent_at=case when p_sent then now() else sent_at end,
+  update dh_push_jobs set sent_at=case when p_sent then coalesce(sent_at,now()) else sent_at end,
    lease_until=case when p_sent then null else now()+interval '4 minutes' end
   where id=p_job and claim_id=p_claim;
  end if;
